@@ -1,0 +1,1 @@
+powershell -exec bypass -c Import-Module -Name PSDiagnostics
