@@ -6,7 +6,8 @@
 #define PIPE_NAME "\\\\.\\pipe\\ClrGuard"
 
 // Set this to 0 to block all but the whitelist
-// set this to 1 to allow everything
+// Set this to 1 to allow everything
+// Command line -a can override this
 DWORD g_DefaultAllowAction = 0;
 
 typedef struct
@@ -263,6 +264,11 @@ int main(int argc, char ** argv)
                 return 1;
             }
         }
+        else if (0 == _stricmp(pArg, "-a"))
+        {
+            printf("Default action is set to allow (log only)\n");
+            g_DefaultAllowAction = 1;
+        }
         else if (0 == _stricmp(pArg, "-i"))
         {
             printf("Installing service..\n");
@@ -279,6 +285,7 @@ int main(int argc, char ** argv)
         {
             printf("ClrGuard options\n");
             printf("-i\t\t\tInstall as a service (named %ws)\n", SVCNAME);
+            printf("-a\t\t\tSet the default action to allow (log only)\n");
             printf("-f <file>\t\tDump .NET PE info for target file\n");
             return 1;
         }
