@@ -88,3 +88,28 @@ typedef void*(__fastcall*_LoadImage4)(
     void* stackMark,
     void* fForIntrospection,
     void* securityContextSource);
+
+#ifdef _WIN64
+typedef void*(*_LoadModule4)(
+#else
+typedef void*(__fastcall*_LoadModule4)(
+#endif
+    void * pAssembly,
+    LPCWSTR wszModuleName,
+    LPCBYTE pRawModule,
+    INT32 cbModule,
+    LPCBYTE pRawSymbolStore,
+    INT32 cbSymbolStore,
+    void * retModule);
+
+#ifdef _WIN64
+typedef void*(*_LoadModule2)(
+#else
+typedef void*(__fastcall*_LoadModule2)(
+#endif
+    void * pAssembly,
+    void * ModuleName,
+    U1Array* PEByteArrayUNSAFE,
+    U1Array* SymByteArrayUNSAFE,
+    void * module);
+

@@ -6,6 +6,8 @@
 
 HookInfo g_imageLoadHook2;
 HookInfo g_imageLoadHook4;
+HookInfo g_loadModuleHook4;
+HookInfo g_loadModuleHook2;
 
 void * FindData(void * startAddr, DWORD memSize, char * targetStr, DWORD targetSize)
 {
@@ -65,6 +67,44 @@ MyLoadImage2(U1Array* PEByteArrayUNSAFE,
     return retVal;
 }
 
+
+//
+// Hook used for native LoadModule in mscorwks.dll
+//
+#ifdef _WIN64
+void *
+#else
+void * __stdcall
+#endif
+MyLoadModule2(void * pAssembly,
+    void * ModuleName,
+    U1Array* PEByteArrayUNSAFE,
+    U1Array* SymByteArrayUNSAFE,
+    void * module)
+{
+    DWORD bufSize = 0;
+    void * retVal = 0;
+    bool allowLoad = true;
+    _LoadModule2 pOldLoadModule = (_LoadModule2)g_loadModuleHook2.pOldFunction;
+
+    debug_print("Loading image of size: %p\n", (void*)PEByteArrayUNSAFE->bufferSize);
+    debug_print("Header: %s\n", (char*)PEByteArrayUNSAFE->buffer);
+
+    allowLoad = ReportLoadImage(PEByteArrayUNSAFE->buffer, (DWORD)PEByteArrayUNSAFE->bufferSize);
+
+    if (!allowLoad)
+    {
+        printf("***BLOCKED***\n");
+        ExitProcess(-1);
+    }
+
+    retVal = pOldLoadModule(pAssembly, ModuleName, PEByteArrayUNSAFE, SymByteArrayUNSAFE, module);
+
+    return retVal;
+
+}
+
+
 //
 // Hook used for native LoadImage in clr.dll
 //
@@ -99,8 +139,47 @@ MyLoadImage4(U1Array* PEByteArrayUNSAFE,
     retVal = pOldLoadImage(PEByteArrayUNSAFE, SymByteArrayUNSAFE, securityUNSAFE, stackMark, fForIntrospection, securityContextSource);
 
     return retVal;
-    
+
 }
+
+//
+// Hook used for native LoadModule in clr.dll
+//
+#ifdef _WIN64
+void *
+#else
+void * __fastcall
+#endif
+MyLoadModule4(void * pAssembly,
+    LPCWSTR wszModuleName,
+    LPCBYTE pRawModule,
+    INT32 cbModule,
+    LPCBYTE pRawSymbolStore,
+    INT32 cbSymbolStore,
+    void * retModule)
+{
+    DWORD bufSize = 0;
+    void * retVal = 0;
+    bool allowLoad = true;
+    _LoadModule4 pOldLoadModule = (_LoadModule4)g_loadModuleHook4.pOldFunction;
+
+    debug_print("Loading image of size: %lx\n", cbModule);
+    debug_print("Header: %s\n", (char*)pRawModule);
+
+    allowLoad = ReportLoadImage((void*)pRawModule, (DWORD)cbModule);
+
+    if (!allowLoad)
+    {
+        printf("***BLOCKED***\n");
+        ExitProcess(-1);
+    }
+
+    retVal = pOldLoadModule(pAssembly, wszModuleName, pRawModule, cbModule, pRawSymbolStore, cbSymbolStore, retModule);
+
+    return retVal;
+
+}
+
 
 void _AllocConsole()
 {
@@ -110,21 +189,21 @@ void _AllocConsole()
     SetConsoleTitle(L"ClrHook");
 }
 
-// Locate the native LoadImage() function. This is a bit
+// Locate the native LoadImage/LoadModule function. This is a bit
 // Hackerman has worked on all versions tested.
-void * LocateAssemblyLoad(void * imageBase, DWORD imageSize)
+void * LocateFunctionByName(char * funcName, void * imageBase, DWORD imageSize)
 {
-    void * nLoadImage = FindData(imageBase, imageSize, "nLoadImage", (DWORD)strlen("nLoadImage"));
+    void * pFuncName = FindData(imageBase, imageSize, funcName, (DWORD)strlen(funcName));
 
-    if (nLoadImage == 0)
+    if (pFuncName == 0)
     {
-        debug_print("nLoadImage not found\n");
+        debug_print("%s not found\n", funcName);
         return 0;
     }
 
-    debug_print("nLoadImage found at: %p\n", nLoadImage);
+    debug_print("%s found at: %p\n", funcName, pFuncName);
 
-    void * pMapping = FindData(imageBase, imageSize, (char*)&nLoadImage, sizeof(DWORD_PTR));
+    void * pMapping = FindData(imageBase, imageSize, (char*)&pFuncName, sizeof(DWORD_PTR));
 
     if (pMapping == 0)
     {
@@ -134,12 +213,13 @@ void * LocateAssemblyLoad(void * imageBase, DWORD imageSize)
 
     debug_print("pMapping found at: %p\n", pMapping);
 
-    void * pImageLoad = *(void**)((DWORD_PTR)pMapping - sizeof(DWORD_PTR));
+    void * pFuncAddr = *(void**)((DWORD_PTR)pMapping - sizeof(DWORD_PTR));
 
-    debug_print("pImageLoad found at: %p\n", pImageLoad);
+    debug_print("%s found at: %p\n", funcName, pFuncAddr);
 
-    return pImageLoad;
+    return pFuncAddr;
 }
+
 
 
 //
@@ -162,7 +242,7 @@ VOID CALLBACK LdrDllNotification(
             // Add Hook
             debug_print("Loaded %ws\n", NotificationData->Loaded.BaseDllName->Buffer);
 
-            void * pImageLoad = LocateAssemblyLoad(NotificationData->Loaded.DllBase, NotificationData->Loaded.SizeOfImage);
+            void * pImageLoad = LocateFunctionByName("nLoadImage", NotificationData->Loaded.DllBase, NotificationData->Loaded.SizeOfImage);
 
             if (pImageLoad)
             {
@@ -170,6 +250,16 @@ VOID CALLBACK LdrDllNotification(
                 g_imageLoadHook2.pNewFunction = MyLoadImage2;
                 InstallHook(&g_imageLoadHook2);
             }
+
+            void * pLoadModule = LocateFunctionByName("_nLoadModule", NotificationData->Loaded.DllBase, NotificationData->Loaded.SizeOfImage);
+
+            if (pLoadModule)
+            {
+                g_loadModuleHook2.pTargetFunction = pLoadModule;
+                g_loadModuleHook2.pNewFunction = MyLoadModule2;
+                InstallHook(&g_loadModuleHook2);
+            }
+
         }
         else if (_wcsicmp(NotificationData->Loaded.BaseDllName->Buffer, L"clr.dll") == 0)
         {
@@ -179,16 +269,26 @@ VOID CALLBACK LdrDllNotification(
             // Add Hook
             debug_print("Loaded %ws\n", NotificationData->Loaded.BaseDllName->Buffer);
 
-            void * pImageLoad = LocateAssemblyLoad(NotificationData->Loaded.DllBase, NotificationData->Loaded.SizeOfImage);
-            
+            void * pImageLoad = LocateFunctionByName("nLoadImage", NotificationData->Loaded.DllBase, NotificationData->Loaded.SizeOfImage);
+
             if (pImageLoad)
             {
                 g_imageLoadHook4.pTargetFunction = pImageLoad;
                 g_imageLoadHook4.pNewFunction = MyLoadImage4;
                 InstallHook(&g_imageLoadHook4);
             }
+
+            void * pLoadModule = LocateFunctionByName("LoadModule", NotificationData->Loaded.DllBase, NotificationData->Loaded.SizeOfImage);
+
+            if (pLoadModule)
+            {
+                g_loadModuleHook4.pTargetFunction = pLoadModule;
+                g_loadModuleHook4.pNewFunction = MyLoadModule4;
+                InstallHook(&g_loadModuleHook4);
+            }
+
         }
-       
+
     }
 
 }
